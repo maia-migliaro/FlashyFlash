@@ -6,7 +6,7 @@ import { ArrowLeft, Download, Plus, Save, Upload } from 'lucide-react'
 import type { Folder } from '@/types/folder'
 import type { Flashcard } from '@/types/flashcard'
 import { folderPath, parseTags } from '@/lib/folders'
-import { emptyCsvRow, parseEditorCsv, serializeCsv, type CsvRow } from '@/lib/csv'
+import { emptyCsvRow, parseEditorCsv, repeatedCardsMessage, repeatedDefinitions, serializeCsv, type CsvRow } from '@/lib/csv'
 
 interface AllCardsViewProps {
   folders: Folder[]
@@ -156,6 +156,11 @@ export default function AllCardsView({
 
   async function save() {
     const nextRows = currentRows().filter((row) => row.definition.trim() && row.answer.trim())
+    const repeats = repeatedDefinitions(nextRows)
+    if (repeats.length > 0) {
+      alert(repeatedCardsMessage(repeats))
+      return
+    }
     setSaving(true)
 
     try {
@@ -210,7 +215,7 @@ export default function AllCardsView({
         if (matchId && matchId !== 'pending') {
           const { error } = await supabase.from('flashcards').update(payload).eq('id', matchId)
           if (error) throw error
-        } else {
+        } else if (!matchId) {
           toInsert.push({ ...payload, user_id: user.id })
           byFolderAndDefinition.set(`${folderId}::${payload.definition.toLowerCase()}`, 'pending')
         }

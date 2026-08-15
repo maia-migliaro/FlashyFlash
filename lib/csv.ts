@@ -71,7 +71,7 @@ function parseCsvLine(line: string): string[] {
 }
 
 export function parseEditorCsv(text: string): CsvRow[] {
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  const lines = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
   if (lines.length === 0) return []
 
@@ -136,4 +136,26 @@ export function parseCardText(text: string): ParsedCard[] {
 
 function parseTagList(value: string): string[] {
   return [...new Set(value.split(/[,;|]/).map((tag) => tag.trim()).filter(Boolean))]
+}
+
+export function repeatedDefinitions(
+  items: { definition: string; folder?: string }[]
+): string[] {
+  const counts = new Map<string, { label: string; count: number }>()
+  for (const item of items) {
+    const label = item.definition.trim()
+    if (!label) continue
+    const key = `${(item.folder || '').trim().toLowerCase()}::${label.toLowerCase()}`
+    const current = counts.get(key)
+    if (current) current.count += 1
+    else counts.set(key, { label, count: 1 })
+  }
+  return [...counts.values()].filter((item) => item.count > 1).map((item) => item.label)
+}
+
+export function repeatedCardsMessage(definitions: string[]): string {
+  const unique = [...new Set(definitions)]
+  const list = unique.join(', ')
+  const noun = unique.length === 1 ? 'card' : 'cards'
+  return `Repeated ${noun}: ${list}. Each definition must be unique — slightly change the extra copies.`
 }

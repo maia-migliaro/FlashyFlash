@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Upload, X } from 'lucide-react'
-import { parseCardText } from '@/lib/csv'
+import { parseCardText, repeatedCardsMessage, repeatedDefinitions } from '@/lib/csv'
 
 interface ImportCardsModalProps {
   folderId: string
@@ -24,6 +24,7 @@ export default function ImportCardsModal({
   const fileRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
   const parsed = parseCardText(text)
+  const repeats = repeatedDefinitions(parsed)
 
   useEffect(() => {
     document.body.style.overflow = 'hidden'
@@ -45,6 +46,10 @@ export default function ImportCardsModal({
 
   async function handleImport() {
     if (parsed.length === 0) return
+    if (repeats.length > 0) {
+      alert(repeatedCardsMessage(repeats))
+      return
+    }
     setLoading(true)
 
     try {
@@ -76,11 +81,11 @@ export default function ImportCardsModal({
         }
 
         const existingId = byDefinition.get(key)
-        if (existingId) {
+        if (existingId && existingId !== 'pending') {
           const { error } = await supabase.from('flashcards').update(payload).eq('id', existingId)
           if (error) throw error
           updated += 1
-        } else {
+        } else if (!existingId) {
           toInsert.push({
             ...payload,
             user_id: user.id,
@@ -172,6 +177,11 @@ export default function ImportCardsModal({
           <p className="text-sm text-[var(--foreground)]/60">
             {parsed.length} {parsed.length === 1 ? 'card' : 'cards'} ready
           </p>
+          {repeats.length > 0 && (
+            <p className="text-sm text-red-600 dark:text-red-400">
+              {repeatedCardsMessage(repeats)}
+            </p>
+          )}
           <label className="flex items-center gap-2 text-sm text-[var(--foreground)]">
             <input
               type="checkbox"
@@ -193,7 +203,7 @@ export default function ImportCardsModal({
           <button
             type="button"
             onClick={handleImport}
-            disabled={loading || parsed.length === 0}
+            disabled={loading || parsed.length === 0 || repeats.length > 0}
             className="flex-1 px-4 py-3 bg-[var(--accent)] text-white rounded-lg disabled:opacity-50 min-h-[44px] font-medium"
           >
             {loading ? 'Importing...' : `Import ${parsed.length}`}
