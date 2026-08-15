@@ -13,6 +13,7 @@ import AllCardsView from './AllCardsView'
 import { getChildren, getDescendantIds, folderPath } from '@/lib/folders'
 import { buildReviewQueue } from '@/lib/reviewQueue'
 import { getTodayKey } from '@/lib/srs'
+import { useReviewLimits } from '@/lib/useReviewLimits'
 
 export default function FoldersList() {
   const [folders, setFolders] = useState<Folder[]>([])
@@ -23,11 +24,13 @@ export default function FoldersList() {
   const [reviewCards, setReviewCards] = useState<Flashcard[] | null>(null)
   const [showAllCards, setShowAllCards] = useState(false)
   const [search, setSearch] = useState('')
+  const { newLimit, reviewLimit, hydrated } = useReviewLimits()
   const supabase = createClient()
 
   useEffect(() => {
+    if (!hydrated) return
     loadFolders()
-  }, [])
+  }, [hydrated, newLimit, reviewLimit])
 
   async function loadFolders() {
     setLoading(true)
@@ -61,7 +64,7 @@ export default function FoldersList() {
         return {
           ...folder,
           flashcard_count: cards.length,
-          due_count: buildReviewQueue(cards).length,
+          due_count: buildReviewQueue(cards, newLimit, reviewLimit).length,
           subfolder_count: getChildren(withOwn, folder.id).length,
           _cards: undefined,
         }
@@ -94,7 +97,7 @@ export default function FoldersList() {
         .lte('due_date', today)
 
       if (error) throw error
-      setReviewCards(buildReviewQueue(data || []))
+      setReviewCards(buildReviewQueue(data || [], newLimit, reviewLimit))
     } catch (error) {
       console.error('Error loading review cards:', error)
       alert('Failed to load today\'s review')

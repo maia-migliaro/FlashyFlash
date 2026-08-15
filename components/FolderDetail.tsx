@@ -15,6 +15,7 @@ import FolderCard from './FolderCard'
 import AllCardsView from './AllCardsView'
 import { getBreadcrumb, getChildren, getDescendantIds, folderPath } from '@/lib/folders'
 import { buildReviewQueue } from '@/lib/reviewQueue'
+import { useReviewLimits } from '@/lib/useReviewLimits'
 
 interface FolderDetailProps {
   folder: Folder
@@ -50,6 +51,7 @@ export default function FolderDetail({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [moveToId, setMoveToId] = useState('')
   const [showAllCards, setShowAllCards] = useState(false)
+  const { newLimit, reviewLimit } = useReviewLimits()
   const supabase = createClient()
 
   const subfolders = getChildren(allFolders, folder.id)
@@ -88,7 +90,7 @@ export default function FolderDetail({
     onFolderUpdate()
   }
 
-  const reviewCards = buildReviewQueue(descendantCards)
+  const reviewCards = buildReviewQueue(descendantCards, newLimit, reviewLimit)
   const scopedFolderIds = getDescendantIds(allFolders, folder.id)
 
   const allTags = useMemo(() => {
@@ -100,7 +102,7 @@ export default function FolderDetail({
   const visibleCards = useMemo(() => {
     const query = search.trim().toLowerCase()
     return flashcards.filter((card) => {
-      if (cardFilter === 'due' && buildReviewQueue([card]).length === 0) return false
+      if (cardFilter === 'due' && buildReviewQueue([card], newLimit, reviewLimit).length === 0) return false
       if (cardFilter === 'new' && card.state !== 'new') return false
       if (cardFilter === 'learning' && card.state !== 'learning') return false
       if (cardFilter === 'suspended' && !card.suspended) return false
@@ -113,7 +115,7 @@ export default function FolderDetail({
         (card.tags || []).some((tag) => tag.toLowerCase().includes(query))
       )
     })
-  }, [flashcards, search, tagFilter, cardFilter])
+  }, [flashcards, search, tagFilter, cardFilter, newLimit, reviewLimit])
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {

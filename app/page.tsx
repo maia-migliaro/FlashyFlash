@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import LogoutButton from '@/components/LogoutButton'
 import ThemeToggle from '@/components/ThemeToggle'
+import ReviewLimitsButton from '@/components/ReviewLimitsButton'
 import FoldersList from '@/components/FoldersList'
 
 export default async function Home() {
@@ -22,6 +23,7 @@ export default async function Home() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <ReviewLimitsButton />
             <ThemeToggle />
             <LogoutButton />
           </div>

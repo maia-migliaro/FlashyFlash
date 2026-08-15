@@ -1,8 +1,9 @@
 import type { Flashcard } from '@/types/flashcard'
 import { isDue } from '@/lib/srs'
+import { DEFAULT_NEW_CARD_LIMIT, DEFAULT_REVIEW_LIMIT } from '@/lib/reviewSettings'
 
-export const NEW_CARD_LIMIT = 20
-export const REVIEW_LIMIT = 100
+export const NEW_CARD_LIMIT = DEFAULT_NEW_CARD_LIMIT
+export const REVIEW_LIMIT = DEFAULT_REVIEW_LIMIT
 
 export function isActive(card: { suspended?: boolean }): boolean {
   return card.suspended !== true
