@@ -1,4 +1,5 @@
 export const CSV_HEADERS = ['id', 'folder', 'definition', 'answer', 'extra', 'tags', 'suspended'] as const
+export const USER_CSV_HEADERS = ['definition', 'answer', 'extra', 'tags'] as const
 
 export interface CsvRow {
   id: string
@@ -31,9 +32,9 @@ export function escapeCsvValue(value: string): string {
 }
 
 export function serializeCsv(rows: CsvRow[]): string {
-  const header = CSV_HEADERS.join(',')
+  const header = USER_CSV_HEADERS.join(',')
   const body = rows.map((row) =>
-    CSV_HEADERS.map((key) => escapeCsvValue(row[key] ?? '')).join(',')
+    USER_CSV_HEADERS.map((key) => escapeCsvValue(row[key] ?? '')).join(',')
   )
   return [header, ...body].join('\n')
 }
@@ -75,7 +76,8 @@ export function parseEditorCsv(text: string): CsvRow[] {
   if (lines.length === 0) return []
 
   const header = parseCsvLine(lines[0]).map((cell) => cell.trim().toLowerCase())
-  const hasHeader = CSV_HEADERS.some((key) => header.includes(key))
+  const knownHeaders = ['id', 'folder', 'definition', 'front', 'answer', 'back', 'extra', 'tags', 'suspended']
+  const hasHeader = header.some((cell) => knownHeaders.includes(cell))
   const start = hasHeader ? 1 : 0
   const index = {
     id: header.indexOf('id'),
@@ -92,19 +94,22 @@ export function parseEditorCsv(text: string): CsvRow[] {
     if (!lines[i].trim()) continue
     const cells = parseCsvLine(lines[i])
     const get = (column: keyof typeof index, fallbackIndex: number) => {
-      const fromHeader = index[column]
-      const value = fromHeader >= 0 ? cells[fromHeader] : cells[fallbackIndex]
-      return (value ?? '').trim()
+      if (hasHeader) {
+        const fromHeader = index[column]
+        if (fromHeader < 0) return ''
+        return (cells[fromHeader] ?? '').trim()
+      }
+      return (cells[fallbackIndex] ?? '').trim()
     }
 
     rows.push({
-      id: hasHeader ? get('id', 0) : (cells[0] ?? ''),
-      folder: hasHeader ? get('folder', 1) : (cells[1] ?? ''),
-      definition: hasHeader ? get('definition', 2) : (cells[2] ?? cells[0] ?? ''),
-      answer: hasHeader ? get('answer', 3) : (cells[3] ?? cells[1] ?? ''),
-      extra: hasHeader ? get('extra', 4) : (cells[4] ?? ''),
-      tags: hasHeader ? get('tags', 5) : (cells[5] ?? ''),
-      suspended: hasHeader ? get('suspended', 6) : (cells[6] ?? 'false'),
+      id: hasHeader ? get('id', 0) : '',
+      folder: hasHeader ? get('folder', -1) : '',
+      definition: hasHeader ? get('definition', 0) : (cells[0] ?? '').trim(),
+      answer: hasHeader ? get('answer', 1) : (cells[1] ?? '').trim(),
+      extra: hasHeader ? get('extra', 2) : (cells[2] ?? '').trim(),
+      tags: hasHeader ? get('tags', 3) : (cells[3] ?? '').trim(),
+      suspended: hasHeader ? get('suspended', -1) || 'false' : 'false',
     })
   }
 
@@ -114,41 +119,21 @@ export function parseEditorCsv(text: string): CsvRow[] {
 export interface ParsedCard {
   definition: string
   answer: string
+  extra: string
   tags: string[]
 }
 
-function splitLooseLine(line: string): string[] {
-  if (line.includes('\t')) return line.split('\t')
-  if (line.includes(';')) return line.split(';')
-  return line.split(',')
-}
-
-function looksLikeHeader(cells: string[]): boolean {
-  const joined = cells.join(' ').toLowerCase()
-  return joined.includes('definition') || joined.includes('front') || joined.includes('answer') || joined.includes('back')
-}
-
 export function parseCardText(text: string): ParsedCard[] {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
+  return parseEditorCsv(text)
+    .filter((row) => row.definition && row.answer)
+    .map((row) => ({
+      definition: row.definition,
+      answer: row.answer,
+      extra: row.extra,
+      tags: parseTagList(row.tags),
+    }))
+}
 
-  if (lines.length === 0) return []
-
-  const first = splitLooseLine(lines[0]).map((cell) => cell.trim())
-  const startIndex = looksLikeHeader(first) ? 1 : 0
-  const cards: ParsedCard[] = []
-
-  for (let i = startIndex; i < lines.length; i++) {
-    const cells = splitLooseLine(lines[i]).map((cell) => cell.trim().replace(/^["']|["']$/g, ''))
-    if (cells.length < 2 || !cells[0] || !cells[1]) continue
-    cards.push({
-      definition: cells[0],
-      answer: cells[1],
-      tags: cells[2] ? cells[2].split('|').map((tag) => tag.trim()).filter(Boolean) : [],
-    })
-  }
-
-  return cards
+function parseTagList(value: string): string[] {
+  return [...new Set(value.split(/[,;|]/).map((tag) => tag.trim()).filter(Boolean))]
 }

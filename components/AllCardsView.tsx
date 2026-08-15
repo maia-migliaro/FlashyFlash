@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft, Download, Plus, Save } from 'lucide-react'
+import { ArrowLeft, Download, Plus, Save, Upload } from 'lucide-react'
 import type { Folder } from '@/types/folder'
 import type { Flashcard } from '@/types/flashcard'
 import { folderPath, parseTags } from '@/lib/folders'
@@ -48,6 +48,7 @@ export default function AllCardsView({
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
 
   const folderOptions = useMemo(
@@ -133,6 +134,26 @@ export default function AllCardsView({
     URL.revokeObjectURL(url)
   }
 
+  function onUploadFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = String(reader.result || '')
+      const imported = parseEditorCsv(text).map((row) => ({
+        ...row,
+        id: '',
+        folder: row.folder || defaultFolderPath || folderOptions[0] || '',
+      }))
+      setRows(imported)
+      setCsvText(serializeCsv(imported))
+      setMode('csv')
+      setOriginalIds([])
+    }
+    reader.readAsText(file)
+    event.target.value = ''
+  }
+
   async function save() {
     const nextRows = currentRows().filter((row) => row.definition.trim() && row.answer.trim())
     setSaving(true)
@@ -141,22 +162,38 @@ export default function AllCardsView({
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not authenticated')
 
-      const keptIds = new Set(nextRows.map((row) => row.id).filter(Boolean))
-      const removedIds = originalIds.filter((id) => !keptIds.has(id))
-
-      if (removedIds.length > 0) {
-        const confirmed = confirm(
-          `You removed ${removedIds.length} card${removedIds.length === 1 ? '' : 's'} from this list. Delete them from the database too?`
-        )
-        if (confirmed) {
-          const { error } = await supabase.from('flashcards').delete().in('id', removedIds)
-          if (error) throw error
+      const hasIds = nextRows.some((row) => row.id)
+      if (hasIds) {
+        const keptIds = new Set(nextRows.map((row) => row.id).filter(Boolean))
+        const removedIds = originalIds.filter((id) => !keptIds.has(id))
+        if (removedIds.length > 0) {
+          const confirmed = confirm(
+            `You removed ${removedIds.length} card${removedIds.length === 1 ? '' : 's'} from this list. Delete them from the database too?`
+          )
+          if (confirmed) {
+            const { error } = await supabase.from('flashcards').delete().in('id', removedIds)
+            if (error) throw error
+          }
         }
       }
 
+      const { data: existingCards, error: existingError } = await supabase
+        .from('flashcards')
+        .select('id, folder_id, definition')
+        .eq('user_id', user.id)
+
+      if (existingError) throw existingError
+
+      const byFolderAndDefinition = new Map(
+        (existingCards || []).map((card) => [
+          `${card.folder_id}::${card.definition.trim().toLowerCase()}`,
+          card.id,
+        ])
+      )
+
       const toInsert: Record<string, unknown>[] = []
       for (const row of nextRows) {
-        const folderId = pathToFolderId.get(row.folder) || folders[0]?.id
+        const folderId = pathToFolderId.get(row.folder) || pathToFolderId.get(defaultFolderPath) || folders[0]?.id
         if (!folderId) throw new Error('Create a folder before saving cards.')
 
         const payload = {
@@ -164,16 +201,18 @@ export default function AllCardsView({
           definition: row.definition.trim(),
           answer: row.answer.trim(),
           extra: row.extra.trim() || null,
-          tags: parseTags(row.tags.replace(/\|/g, ',')),
+          tags: parseTags(row.tags),
           suspended: row.suspended.trim().toLowerCase() === 'true' || row.suspended.trim() === '1',
           updated_at: new Date().toISOString(),
         }
 
-        if (row.id) {
-          const { error } = await supabase.from('flashcards').update(payload).eq('id', row.id)
+        const matchId = row.id || byFolderAndDefinition.get(`${folderId}::${payload.definition.toLowerCase()}`)
+        if (matchId && matchId !== 'pending') {
+          const { error } = await supabase.from('flashcards').update(payload).eq('id', matchId)
           if (error) throw error
         } else {
           toInsert.push({ ...payload, user_id: user.id })
+          byFolderAndDefinition.set(`${folderId}::${payload.definition.toLowerCase()}`, 'pending')
         }
       }
 
@@ -221,7 +260,7 @@ export default function AllCardsView({
               {title}
             </h2>
             <p className="text-sm text-[var(--foreground)]/60">
-              {rows.length} cards · edit in the table or as CSV, then Save
+              {rows.length} cards · upload a word list, edit, then Save. No IDs needed.
             </p>
           </div>
         </div>
@@ -240,6 +279,20 @@ export default function AllCardsView({
               CSV
             </button>
           </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            className="hidden"
+            onChange={onUploadFile}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="flex items-center gap-2 px-3 py-2 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm min-h-[40px]"
+          >
+            <Upload size={16} />
+            Upload CSV
+          </button>
           <button
             onClick={downloadCsv}
             className="flex items-center gap-2 px-3 py-2 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm min-h-[40px]"

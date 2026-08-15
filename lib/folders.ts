@@ -41,7 +41,7 @@ export function canBeParent(folders: Folder[], folderId: string, candidateParent
 
 export function parseTags(value: string): string[] {
   const tags = value
-    .split(',')
+    .split(/[,;|]/)
     .map((tag) => tag.trim())
     .filter(Boolean)
   return [...new Set(tags)]

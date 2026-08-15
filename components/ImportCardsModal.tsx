@@ -1,10 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { X } from 'lucide-react'
+import { Upload, X } from 'lucide-react'
 import { parseCardText } from '@/lib/csv'
-import { definitionsInFolder } from '@/lib/reviewQueue'
 
 interface ImportCardsModalProps {
   folderId: string
@@ -22,6 +21,7 @@ export default function ImportCardsModal({
   const [text, setText] = useState('')
   const [alsoReverse, setAlsoReverse] = useState(false)
   const [loading, setLoading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
   const parsed = parseCardText(text)
 
@@ -32,6 +32,17 @@ export default function ImportCardsModal({
     }
   }, [])
 
+  function onFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      setText(String(reader.result || ''))
+    }
+    reader.readAsText(file)
+    event.target.value = ''
+  }
+
   async function handleImport() {
     if (parsed.length === 0) return
     setLoading(true)
@@ -40,49 +51,70 @@ export default function ImportCardsModal({
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not authenticated')
 
-      const existing = new Set(existingDefinitions.map((item) => item.trim().toLowerCase()))
-      const rows: {
-        user_id: string
-        folder_id: string
-        definition: string
-        answer: string
-        tags: string[]
-      }[] = []
+      const { data: existingCards, error: existingError } = await supabase
+        .from('flashcards')
+        .select('id, definition')
+        .eq('folder_id', folderId)
+
+      if (existingError) throw existingError
+
+      const byDefinition = new Map(
+        (existingCards || []).map((card) => [card.definition.trim().toLowerCase(), card.id])
+      )
+
+      const toInsert: Record<string, unknown>[] = []
+      let updated = 0
 
       for (const card of parsed) {
         const key = card.definition.toLowerCase()
-        if (existing.has(key)) continue
-        existing.add(key)
-        rows.push({
-          user_id: user.id,
-          folder_id: folderId,
+        const payload = {
           definition: card.definition,
           answer: card.answer,
+          extra: card.extra.trim() || null,
           tags: card.tags,
-        })
+          updated_at: new Date().toISOString(),
+        }
+
+        const existingId = byDefinition.get(key)
+        if (existingId) {
+          const { error } = await supabase.from('flashcards').update(payload).eq('id', existingId)
+          if (error) throw error
+          updated += 1
+        } else {
+          toInsert.push({
+            ...payload,
+            user_id: user.id,
+            folder_id: folderId,
+          })
+          byDefinition.set(key, 'pending')
+        }
 
         if (alsoReverse && card.definition.toLowerCase() !== card.answer.toLowerCase()) {
           const reverseKey = card.answer.toLowerCase()
-          if (!existing.has(reverseKey)) {
-            existing.add(reverseKey)
-            rows.push({
+          if (!byDefinition.has(reverseKey)) {
+            toInsert.push({
               user_id: user.id,
               folder_id: folderId,
               definition: card.answer,
               answer: card.definition,
+              extra: card.extra.trim() || null,
               tags: card.tags,
             })
+            byDefinition.set(reverseKey, 'pending')
           }
         }
       }
 
-      if (rows.length === 0) {
-        alert('Nothing to import. Those cards already exist in this folder.')
+      if (toInsert.length > 0) {
+        const { error } = await supabase.from('flashcards').insert(toInsert)
+        if (error) throw error
+      }
+
+      if (toInsert.length === 0 && updated === 0) {
+        alert('Nothing to import.')
         return
       }
 
-      const { error } = await supabase.from('flashcards').insert(rows)
-      if (error) throw error
       onSuccess()
     } catch (error: any) {
       console.error('Error importing cards:', error)
@@ -111,14 +143,31 @@ export default function ImportCardsModal({
 
         <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
           <p className="text-sm text-[var(--foreground)]/60">
-            Paste one card per line: <code className="text-xs">definition,answer</code>. Tabs and semicolons work too. Optional third column is tags, separated by <code className="text-xs">|</code>.
+            Upload or paste a CSV with columns <code className="text-xs">definition,answer,extra,tags</code>.
+            No id column needed. Existing words in this folder are updated; new words are created.
+            Tags can be separated with <code className="text-xs">;</code> or commas.
           </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            className="hidden"
+            onChange={onFile}
+          />
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="flex items-center gap-2 px-3 py-2 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm"
+          >
+            <Upload size={16} />
+            Upload CSV file
+          </button>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={10}
             className="w-full px-3 py-2 bg-[var(--muted)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--accent)] text-[var(--foreground)] font-mono text-sm"
-            placeholder={'hola,hello\nadiós,goodbye,travel|basics'}
+            placeholder={'definition,answer,extra,tags\nhello,hallo,,German A1;Basics'}
           />
           <p className="text-sm text-[var(--foreground)]/60">
             {parsed.length} {parsed.length === 1 ? 'card' : 'cards'} ready
